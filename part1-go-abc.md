@@ -212,11 +212,11 @@ func main(){
 
 删除元素是截取切片和合并切片的组合操作：
 
-![slice-delete](D:\doc\Time-to-go\media\slice-delete.PNG)
+![slice-delete](media/slice-delete.PNG)
 
 需要注意的时，当使用`make([]string,n)`，n不为0时，`array[0],...,array[n]`均为`nil`。
 
-![slice](D:\doc\Time-to-go\media\slice.PNG)
+![slice](media/slice.PNG)
 
 
 

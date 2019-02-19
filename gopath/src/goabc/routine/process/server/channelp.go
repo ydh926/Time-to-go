@@ -15,14 +15,15 @@ func Process(){
 	for{
 		select {
 		case <-stop.C:
+			println("时间到，关闭！！！")
 			break
 		case s,ok:=<-chr:
 			if ok{
-				println(s)
+				println("你的输入是："+s)
 			}
 		case s,ok:=<-chn:
 			if ok{
-				println(s)
+				println("接收到客户端的消息："+s)
 			}
 		}
 	}

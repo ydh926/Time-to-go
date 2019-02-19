@@ -2,7 +2,7 @@ package routine
 
 import "time"
 
-func testGo(){
+func TestGo(){
 		req := make(chan int)
 		go doPlus(1,1,req)
 		v,ok := <-req

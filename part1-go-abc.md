@@ -2,7 +2,29 @@
 
 ## 1. hello-world
 
-在如下目录建立
+再开始之前我们需要做一些准备工作：
+
+1. 下载安装go
+
+2. 设置GOPATH
+
+   ```
+   +--gopath
+   |  +--bin
+   |  +--pkg
+   |  +--src
+   +-....
+   ```
+
+3. 将GOPATH设置到环境变量中
+
+   ```shell
+   GOPATH=path/to/gopath
+   PATH=$PATH:$GOPATH
+   ```
+
+
+准备工作结束后，就可以开始我们第一个go应用了，在src目录下新建我们的工程goabc。
 
 ```
 +--gopath
@@ -136,12 +158,22 @@ func main(){
 - 简单使用
 
   ```go
-  func testMap(){
+  func TestMap(){
       Roster := make(map[string]string,0) //初始化
-      Roster2 ：= map[string]int{"bob":1, "bob2":2}
+      //Roster2 := map[string]int{"bob":1, "bob2":2}
       Roster["bob"]="01"    //插入数据
-      delete(Roster, "bob") //删除数据
+      printBob()
       Roster["bob"]="02"    //修改数据
+      printBob()
+      delete(Roster, "bob") //删除数据
+  }
+  func printBob(){
+      value,ok := Roster["bob"]  //查询数据
+      if ok{
+          print("bob is "+Roster["bob"])
+      }else{
+          print("There is no bob")
+      }
   }
   ```
 
@@ -191,7 +223,7 @@ func main(){
 - 简单使用
 
   ```go
-  func testSlice() {
+  func TestSlice() {
   	array := make([]int, 0)  //初始化
   	array = append(array, 0) //增加元素
   	printSlice(array)
@@ -215,7 +247,7 @@ func main(){
 
 ![slice-delete](media/slice-delete.PNG)
 
-需要注意的时，当使用`make([]string,n)`，n不为0时，`array[0],...,array[n]`均为`nil`。
+需要注意的时，当使用`make([]struct{},n)`，n不为0时，`array[0],...,array[n]`均为该类型的初始化值。
 
 ![slice](media/slice.PNG)
 

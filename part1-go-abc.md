@@ -1,3 +1,5 @@
+[TOC]
+
 # Go ABC
 
 ## 1. hello-world

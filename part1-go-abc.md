@@ -2,7 +2,7 @@
 
 ## 1. hello-world
 
-再开始之前我们需要做一些准备工作：
+开始之前我们需要做一些准备工作：
 
 1. 下载安装go
 
@@ -258,8 +258,13 @@ func main(){
 ### 条件
 
 ```go
-func testIf(){
-    a = Random
+func printBob(){
+    value,ok := Roster["bob"]  //查询数据
+    if ok{
+        print("bob is "+Roster["bob"])
+    }else{
+        print("There is no bob")
+    }
 }
 ```
 
@@ -637,11 +642,7 @@ BenchmarkDoDebug2-4   	   10000	    185300 ns/op
 
 ## 9. 下节预告
 
-part2：设计模式
-
-part3：运行时调度
-
-part4：类型系统
+part2：运行时调度
 
 ....
 

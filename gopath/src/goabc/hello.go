@@ -1,8 +1,10 @@
 package main
 
-import "goabc_link"
+import "goabc/interfacex"
 
 func main() {
 	//testGo()
-	println(goabc_link.Echo())
+	//println(goabc_link.Echo())
+	bob := &interfacex.Bob{}
+	interfacex.DoDebug2(bob)
 }

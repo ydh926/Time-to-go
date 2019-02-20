@@ -251,8 +251,6 @@ func main(){
 
 需要注意的时，当使用`make([]struct{},n)`，n不为0时，`array[0],...,array[n]`均为该类型的初始化值。
 
-![slice](media/slice.PNG)
-
 
 
 ## 5. 条件和循环
@@ -642,9 +640,80 @@ BenchmarkDoDebug2-4   	   10000	    185300 ns/op
 
 差距非常明显~，因为调用interface的方法相当于调用c++中虚函数的方法，是要在interface下的函数表中找到真正要调用的方法是哪个。因此在做了类型断言之后，尽可能的用断言类型的方法取代interface的方法。
 
-## 9. 下节预告
+## 9. 嵌套类型
 
-part2：运行时调度
+golang里面有一种和继承非常相似的用法，称为嵌套类型。用法是:
+
+```go
+type A struct {
+T | *T
+}
+```
+
+我们再已程序员Bob来举例说明：
+
+```go
+type Singer struct{
+    Fans []string
+}
+
+func (*Singer) Sing() string {
+	return "燃烧我的卡路里"
+}
+
+//我们的Bob不仅是一个出色的程序员，还能唱得一首好歌
+type Bob struct {
+	Singer
+}
+
+func main(){
+    bob := &Bob{
+    }
+    //不需要为Bob定义唱歌的方法，Bob会自动使用Singer的唱歌方法
+    bob.Sing()
+    //同样的，Bob的粉丝也不需要再次定义
+    bob.Fans = make(string[],0)
+}
+```
+
+假如此时的Bob不仅仅满足于做一个歌手，而要做一个唱跳歌手了，这时候就有问题了
+
+```go
+type Dancer struct{
+    Fans []string
+}
+type Bob struct {
+	Singer
+    Dancer
+}
+func main(){
+    bob := &Bob{
+    }
+    bob.Fans = make(string[],0)//此时会导致编译错误，编译器无法判断是使用Dancer里的Fans还是	Singer里的Fans
+}
+```
+
+这里到一个编译问题，当嵌套类型有重名成员时，golang会优先使用嵌套层数少的作为外层类型的成员。当嵌套层数一样少切重名就会引起编译错误。
+
+```mermaid
+
+```
+
+为了圆Bob作为唱跳歌手的梦想，我们可以这么改写：
+
+```go
+func main(){
+    bob := &Bob{
+    }
+    //显示的标明嵌套路径不会引起报错
+    bob.Singer.Fans = make(string[],0)
+    bob.Dancer.Fans = make(string[],0)
+}
+```
+
+## 10. 下节预告
+
+part2：go schedule
 
 ....
 

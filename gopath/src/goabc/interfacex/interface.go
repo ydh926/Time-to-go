@@ -9,7 +9,21 @@ type Programer interface {
 	Debug()
 }
 
+type Singer struct {
+	Fans []string
+}
+
+func (*Singer) Sing() string {
+	return "燃烧我的卡路里"
+}
+
+type Dancer struct{
+	Fans []string
+}
+
 type Bob struct {
+	Singer
+	Dancer
 }
 
 func (*Bob) Say() string {

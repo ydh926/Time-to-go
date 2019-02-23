@@ -22,7 +22,7 @@
 
    ```shell
    GOPATH=path/to/gopath
-   PATH=$PATH:$GOPATH
+   PATH=$PATH:$GOPATH/bin
    ```
 
 
@@ -50,7 +50,7 @@ func main(){
 }
 ```
 
-在`goabc`文件夹下执行`go build`，即可得到名称为hello的可执行文件。执行`go install`，将可知行文件安装到`gopath/bin`目录下。
+在`goabc`文件夹下执行`go build`，即可得到名称为goabc的可执行文件。执行`go install`，将可知行文件安装到`gopath/bin`目录下。
 
 - 只有package name为main的包才可被编译为可执行文件，该包下的`main`函数为主函数。
 
@@ -271,7 +271,7 @@ func printBob(){
 ### 循环
 
 ```go
-for i:=0i<100;i++{
+for i:=0;i<100;i++{
     println(i)
 }
 
@@ -281,7 +281,7 @@ for index := range slicex{
     slicex[index] = index
 }
 for _,value := range slicex{
-    println(v)
+    println(value)
 }
 
 //遍历map
@@ -405,6 +405,7 @@ BenchmarkQuickSort1000000-4    	       1	3298000000 ns/op
 ```go
 func testGo(){
     go doPlus(1,1)
+    //...
 }
 func doPlus(a,b int)int{
     time.Sleep(10000)
@@ -549,7 +550,7 @@ channel也是go语言的一大特色，channel抽象了协程通信的过程，�
 
 ### interface
 
-interface是go类型系统中的重要一环，总所周知，go是不存在继承关系的，如何写一个可以适配多个类的方法，这就要用到interface。
+interface是go类型系统中的重要一环，众所周知，go是不存在继承关系的，如何写一个可以适配多个类的方法，这就要用到interface。
 
 - 定义interface，与java非常相似
 
@@ -680,6 +681,9 @@ func main(){
 
 ```go
 type Dancer struct{
+    A 
+}
+type A struct{
     Fans []string
 }
 type Bob struct {

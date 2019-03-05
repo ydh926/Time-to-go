@@ -1,4 +1,4 @@
-# 运行时调度
+# Go Schedule
 
 goroutine的高并发能力与其背后的调度器息息相关，这一章我们就来了解一下go的调度机制~同时，在本章的最后一节会介绍一个Go并发调优的大杀器go trace来帮助大家更好的学习go的调度！！！
 
@@ -27,16 +27,7 @@ goroutine的高并发能力与其背后的调度器息息相关，这一章我�
 可以在`runtime/runtime2.go`中看到三大主角的原貌，在这里我们将它们简化一下便于理解：
 
 ```go
-//g本质上是维护了一个协程栈
-//被运行的g会和执行他的m关联上
-type g struct {
-	stack          stack   // offset known to runtime/cgo
-    sched          gobuf   // 当发生调度时，保存现场，记录了当前运行的pc和sp
-    atomicstatus   uint32  // 当前goroutine的状态
-	m              *m      // current m; offset known to arm liblink
-    //preempt是抢占标志位，m在执行g时会查看该标志位，以决定是否中断当前任务
-	preempt        bool    // preemption signal, duplicates stackguard0 = stackpreempt
-}
+
 
 //m有自己线程栈（g0栈），当前运行的g，以及一个p（goroutine队列）
 //m可以脱离p运行当m执行的不是go代码的时候
@@ -79,7 +70,7 @@ type schedt struct {
 	runqhead guintptr
 	runqtail guintptr
 	runqsize int32
-    //...
+    // 除了全局队列，schedt中也会存放关于调度的全局信息...
 }
 ```
 
@@ -87,7 +78,7 @@ type schedt struct {
 
 `runtime/proc.go--func findrunnable()`
 
-这时候勤劳的gopher夜以继日幸苦劳作终于把车中的goroutine都执行完了，这时候，它想起来还有一部分goroutine被自己扔在了全局队列中，于是它又跑去全局队列中拿goroutine，那么它应该拿多少goroutine呢？机智的gopher掐指一算，拿走了n个goroutine放到了自己小车中。`n := sched.runqsize/gomaxprocs + 1`.（n大于256则取256）。
+勤劳的gopher夜以继日幸苦劳作终于把车中的goroutine都执行完了，但是，它想起来还有一部分goroutine被自己扔在了全局队列中，于是它又跑去全局队列中拿goroutine，那么它应该拿多少goroutine呢？机智的gopher掐指一算，拿走了n个goroutine放到了自己小车中。`n := sched.runqsize/gomaxprocs + 1`.（n大于256则取256）。
 
 终于有一天，gopher发现连全局队列里的goroutine都被拿完了，gopher感觉自己已经到达了人生的巅峰终于可以安度晚年的。这时，另一个gopher推着小车经过了它的身边，善良而又勤劳的gopher想，虽然自己已经可以功成身退了，但是自己的兄弟们还在水深火热的境地中搬砖，于是它又推起了小车，偷偷的将刚刚那个gopher车里一半的砖放到了自己车里...
 
@@ -133,8 +124,118 @@ m会从其他m的p的队尾偷取一半的goroutine，以避免锁操作。
 
 有些时候值班小哥发现自己去工作了就已经没有人值班了，这个时候它会唤醒一个已经休息的gopher成为新的值班者。
 
+
+
 ## 2. Go背后的故事
 
+上一章讲到goroutine的用法，只需要`go func`即可，那么`go`关键字的背后是怎么将任务添加到调度队列中的呢？
+
+首先编译器会识别出哪些地方进行了函数调用，当不加go关键字时，这次调用就是一次正常调用，加了go关键字，这次调用就成为了一次`callGo`，编译器会进行如下操作：
+
+```go
+	case k == callGo:
+		call = s.newValue1A(ssa.OpStaticCall, types.TypeMem, newproc, s.mem())
+```
+
+简单来讲，callGo会导致此处调用newproc函数，`newproc = sysfunc("newproc")`。我们在`go/runtime/proc.go`中可以找到这个函数。
+
+```go
+func newproc(siz int32, fn *funcval) {
+	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
+	gp := getg()  //这里拿到caller的goroutine
+	pc := getcallerpc()
+    //systemstack意味着里面的函数式通过线程栈（g0栈）来进行的
+	systemstack(func() {
+		newproc1(fn, (*uint8)(argp), siz, gp, pc) 
+	})
+}
+
+func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintptr) {
+    _g_ := getg() //这里又getg了，这个g就是g0
+    //...忽略一些细节
+    
+    //这里需要注意一下函数参数表在go里面不能无限大的...
+	// We could allocate a larger initial stack if necessary.
+	// Not worth it: this is almost always an error.
+	// 4*sizeof(uintreg): extra space added below
+	// sizeof(uintreg): caller's LR (arm) or return address (x86, in gostartcall).
+	if siz >= _StackMin-4*sys.RegSize-sys.RegSize {
+		throw("newproc: function arguments too large for new goroutine")
+	}
+    
+    //这里拿到了m的小车
+	_p_ := _g_.m.p.ptr()
+    //之前执行完的g会暂时放到_p_.gFree中，所以先尝试从gFree中获得新g
+	newg := gfget(_p_)
+    //没拿到g的话那么会创建一个g
+	if newg == nil {
+		newg = malg(_StackMin)
+		casgstatus(newg, _Gidle, _Gdead)
+		allgadd(newg) // publishes with a g->status of Gdead so GC scanner doesn't look at uninitialized stack.
+    }
+
+    //忽略一些newg初始化的细节。这里开始它就是一个runnable的g了
+	casgstatus(newg, _Gdead, _Grunnable)
+
+    //...
+    
+    //将g放入任务队列中
+	runqput(_p_, newg, true)
+
+    //当启动一个g时，会查看是否有idle状态的p,如果有的话且此时没有spinning m,就会唤醒一个spinning m
+	if atomic.Load(&sched.npidle) != 0 && atomic.Load(&sched.nmspinning) == 0 && mainStarted {
+		wakep()
+	}
+    
+    //...
+}
+```
+
+比较有意思的是runqput的设计:
+
+```go
+func runqput(_p_ *p, gp *g, next bool) {
+    //创建的goroutine会有一半的几率被放入_p_.runnext
+	if randomizeScheduler && next && fastrand()%2 == 0 {
+		next = false
+	}
+
+    //如果被放入runnext，则与oldnext互换身份
+	if next {
+	retryNext:
+		oldnext := _p_.runnext
+		if !_p_.runnext.cas(oldnext, guintptr(unsafe.Pointer(gp))) {
+			goto retryNext
+		}
+		if oldnext == 0 {
+			return
+		}
+		// Kick the old runnext out to the regular run queue.
+		gp = oldnext.ptr()
+	}
+
+retry:
+    //尝试将任务放入m的本地队列的队尾
+	h := atomic.Load(&_p_.runqhead) // load-acquire, synchronize with consumers
+	t := _p_.runqtail
+	if t-h < uint32(len(_p_.runq)) {
+		_p_.runq[t%uint32(len(_p_.runq))].set(gp)
+		atomic.Store(&_p_.runqtail, t+1) // store-release, makes the item available for consumption
+		return
+	}
+    //本地队列被放满时，放入全局队列。
+	if runqputslow(_p_, gp, h, t) {
+		return
+	}
+	// the queue is not full, now the put above must succeed
+	goto retry
+}	
+```
+
+![newproc](media/newproc.png)
+
 ## 3. 上帝说要有光 -- main goroutine
+
+
 
 ## 4. Go程序的摄像机 -- go trace

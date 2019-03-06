@@ -27,7 +27,16 @@ goroutine的高并发能力与其背后的调度器息息相关，这一章我�
 可以在`runtime/runtime2.go`中看到三大主角的原貌，在这里我们将它们简化一下便于理解：
 
 ```go
-
+//g本质上是维护了一个协程栈
+//被运行的g会和执行他的m关联上
+type g struct {
+	stack          stack   // offset known to runtime/cgo
+    sched          gobuf   // 当发生调度时，保存现场，记录了当前运行的pc和sp
+    atomicstatus   uint32  // 当前goroutine的状态
+	m              *m      // current m; offset known to arm liblink
+    //preempt是抢占标志位，m在执行g时会查看该标志位，以决定是否中断当前任务
+	preempt        bool    // preemption signal, duplicates stackguard0 = stackpreempt
+}
 
 //m有自己线程栈（g0栈），当前运行的g，以及一个p（goroutine队列）
 //m可以脱离p运行当m执行的不是go代码的时候
@@ -164,7 +173,7 @@ graph LR
 
 如果M并未进入Syscall，那么Sysmon置起当前goroutine的抢占标志位。当M发现当前G的抢占标志位被置起时，会将该G调度置全局队列中。
 
-![preempt](D:\doc\Time-to-go\media\preempt.png)
+![preempt](media/preempt.png)
 
 ## 3. Go背后的故事
 

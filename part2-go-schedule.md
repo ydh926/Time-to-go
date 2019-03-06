@@ -61,6 +61,8 @@ type p struct {
 }
 ```
 
+`runtime/proc.go--func schedule()`
+
 有了小车，gopher就可以开开心心的搬起砖来了...这时候第一个问题来了，作为黑心老板的我们想要榨干gopher的劳动力，不停的大量制造goroutine扔到gopher的小车子里，但是gopher的小车p只能放下256块砖，怎么办，这时候我们需要一个全局的goroutine队列。
 
 ```go
@@ -79,6 +81,8 @@ type schedt struct {
 `runtime/proc.go--func findrunnable()`
 
 勤劳的gopher夜以继日幸苦劳作终于把车中的goroutine都执行完了，但是，它想起来还有一部分goroutine被自己扔在了全局队列中，于是它又跑去全局队列中拿goroutine，那么它应该拿多少goroutine呢？机智的gopher掐指一算，拿走了n个goroutine放到了自己小车中。`n := sched.runqsize/gomaxprocs + 1`.（n大于256则取256）。
+
+为了防止全局队列中的goroutine“饿死”，在执行了61个本地队列的服务后，会从全局队列中获取一个服务。
 
 终于有一天，gopher发现连全局队列里的goroutine都被拿完了，gopher感觉自己已经到达了人生的巅峰终于可以安度晚年的。这时，另一个gopher推着小车经过了它的身边，善良而又勤劳的gopher想，虽然自己已经可以功成身退了，但是自己的兄弟们还在水深火热的境地中搬砖，于是它又推起了小车，偷偷的将刚刚那个gopher车里一半的砖放到了自己车里...
 
@@ -124,9 +128,45 @@ m会从其他m的p的队尾偷取一半的goroutine，以避免锁操作。
 
 有些时候值班小哥发现自己去工作了就已经没有人值班了，这个时候它会唤醒一个已经休息的gopher成为新的值班者。
 
+## 2. Gopher里的监工--Sysmon
 
+砖，小车，gopher的模型似乎已经足够支持烧砖厂的日常运作了，直到有一天，gopher的小车中出现了一块特别难以烧制的砖，在烧这块砖的过程中它花了很多时间导致了大量的砖堆积在它的小车中得不到烧制。在go的世界中这件事时常发生，如果执行某个goroutine需要耗费大量的时间，那么会导致其他goroutine无法得到调度，所以我们需要一个监工的角色来查看是否有这种情况发生，在go的世界中这个监工就是Sysmon。
 
-## 2. Go背后的故事
+`runtime/proc.g---func sysmon()`
+
+Sysmon主要干如下几件事情：
+
+1. 查看是否有可以运行的网络任务
+2. 处理长时间处于执行同一个任务的线程
+3. 2分钟进行一次强制GC
+4. 将线程申请来的5分钟没有用的span退还给操作系统
+
+```mermaid
+graph TB
+A(sysmon)-->B(poll network)
+B-->C(retakeP)
+C-->D(force GC)
+D-->E(free unused span)
+```
+
+`runtime/proc.g---func sysmon()`
+
+跟调度关联紧密的是处理长时间被执行的goroutine的操作，该操作称为`retakep`。sysmon首先会查看当前执行goroutine的执行时常，当其超过了20us，就会触发retakep。sysmon首先会查看是由何原因导致了m长时间执行同一个任务。如果m长时间进入Syscall状态，那么当前goroutine无法被抢占，该M也没有能力继续执行P中的其他goroutine，所以sysmon会脱离M和P的绑定关系，同时唤醒或创建新的M和P绑定。
+
+```mermaid
+graph LR
+	subgraph handoffP
+	B1-->D(newM-Binding-P)
+	B1(oldM-Binding-P)-->C(oldM-Syscall)
+	end
+
+```
+
+如果M并未进入Syscall，那么Sysmon置起当前goroutine的抢占标志位。当M发现当前G的抢占标志位被置起时，会将该G调度置全局队列中。
+
+![preempt](D:\doc\Time-to-go\media\preempt.png)
+
+## 3. Go背后的故事
 
 上一章讲到goroutine的用法，只需要`go func`即可，那么`go`关键字的背后是怎么将任务添加到调度队列中的呢？
 
@@ -234,8 +274,101 @@ retry:
 
 ![newproc](media/newproc.png)
 
-## 3. 上帝说要有光 -- main goroutine
+## 4. 上帝说要有光 -- main goroutine
+
+在讲go调度模型之前，我们不访先来思考一个问题，go的程序是如何开始的？
+
+接下来我们一层层的拨开披在main.main外面的外衣，看看它们分别做了什么。
+
+以amd64系统为例，在go源码的runtime包中，找到asm_amd64.s这个文件，该文件中的main函数是所有go程序的入口，它的内容是调用runtime.rt0_go。
+
+```assembly
+TEXT main(SB),NOSPLIT,$-8
+	JMP	runtime·rt0_go(SB)
+```
+
+runtime.rt0_go这个函数的内容就十分丰富了，我们忽略一些细节操作。看看它的主要功能有哪些。
+
+```assembly
+TEXT runtime·rt0_go(SB),NOSPLIT,$0
+	//...
+	
+	// 初始化了g0
+	// create istack out of the given (operating system) stack.
+	// _cgo_init may update stackguard.
+	MOVQ	$runtime·g0(SB), DI
+	LEAQ	(-64*1024+104)(SP), BX
+	MOVQ	BX, g_stackguard0(DI)
+	MOVQ	BX, g_stackguard1(DI)
+	MOVQ	BX, (g_stack+stack_lo)(DI)
+	MOVQ	SP, (g_stack+stack_hi)(DI)
+
+    // 根据cpu和系统信息做相应的初始化操作
+    //...
+
+ok:
+    // 将g0和m0关联
+	// set the per-goroutine and per-mach "registers"
+	get_tls(BX)
+	LEAQ	runtime·g0(SB), CX
+	MOVQ	CX, g(BX)
+	LEAQ	runtime·m0(SB), AX
+
+	// save m->g0 = g0
+	MOVQ	CX, m_g0(AX)
+	// save m0 to g0->m
+	MOVQ	AX, g_m(CX)
+	
+	//...
+	//初始化操作
+	CALL	runtime·args(SB)
+	CALL	runtime·osinit(SB)
+	CALL	runtime·schedinit(SB)
+
+    // 看了这么久终于看到入口了，runtime.main进来了!!!
+	// create a new goroutine to start program
+	MOVQ	$runtime·mainPC(SB), AX		// entry
+	PUSHQ	AX
+	PUSHQ	$0			// arg size
+	CALL	runtime·newproc(SB)
+	POPQ	AX
+	POPQ	AX
+
+	// 调用mstart
+	CALL	runtime·mstart(SB)
+
+	CALL	runtime·abort(SB)	// mstart should never return
+	RET
+```
+
+我们理一理rt0_go干的事情：
+
+```mermaid
+graph LR
+A(初始化g0)-->B(关联g0和m0)
+B-->C(各种init)
+C-->D(调用newproc)
+D-->调用mstart
+
+```
+
+回忆以下上一节，其中有一个线程栈的概念，那么线程栈就是在这里被初始化的。
+
+看到这里我们应该有一些疑问了，什么是g0？什么是m0？为什么需要被关联起来？我们先默默的在心里记下这些疑问，继续完成主线任务。
+
+下一层是runtime.newproc，它在runtime包下proc.go文件中，谢天谢地终于不是汇编了...
+
+```go
+func newproc(siz int32, fn *funcval) {
+	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
+	gp := getg()
+	pc := getcallerpc()
+	systemstack(func() {
+		newproc1(fn, (*uint8)(argp), siz, gp, pc)
+	})
+}
+```
 
 
 
-## 4. Go程序的摄像机 -- go trace
+## 5. Go程序的摄像机 -- go trace

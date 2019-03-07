@@ -8,7 +8,9 @@ goroutine的高并发能力与其背后的调度器息息相关，这一章我�
 
 ![go-schedule](media/go-schedule.jpg)
 
-搬砖这件看似简单的事情背后到底隐藏的什么怎么会和go的调度模型扯上关联？这时候我们不妨先来一发哲学三连。
+
+
+搬砖这件看似简单的事情背后到底隐藏的什么，为何会和go的调度模型扯上关联？不妨先来一发哲学三问。
 
 搬的什么？-- 砖
 
@@ -16,7 +18,7 @@ goroutine的高并发能力与其背后的调度器息息相关，这一章我�
 
 用什么搬的？-- 小推车
 
-当大家机智的回答出这些问题的时候，恭喜你对go的调度模型已经有一个初步的认识了。假如这些砖是golang世界中的一个个goroutine，那么gopher搬砖的过程就是调度goroutine的过程，再来一发哲学三连，来扯出我们这一章的三大主角
+当大家机智的回答出这些问题的时候，恭喜你对go的调度模型已经有一个初步的认识了。假如这些砖是golang世界中的一个个goroutine，那么gopher搬砖的过程就是调度goroutine的过程，而砖，gopher和小车在go世界中的映射就是我们这一章节的三大主角，调度模型的核心。
 
 调度的什么？--- g : 它就是大名顶顶的goroutine
 
@@ -24,7 +26,7 @@ goroutine的高并发能力与其背后的调度器息息相关，这一章我�
 
 用的什么调度？ --- p : 线程执行的goroutine队列
 
-可以在`runtime/runtime2.go`中看到三大主角的原貌，在这里我们将它们简化一下便于理解：
+可以在`runtime/runtime2.go`中看到三大主角的原貌，在这里它们的核心内容可以简化为以下结构体：
 
 ```go
 //g本质上是维护了一个协程栈
@@ -72,7 +74,9 @@ type p struct {
 
 `runtime/proc.go--func schedule()`
 
-有了小车，gopher就可以开开心心的搬起砖来了...这时候第一个问题来了，作为黑心老板的我们想要榨干gopher的劳动力，不停的大量制造goroutine扔到gopher的小车子里，但是gopher的小车p只能放下256块砖，怎么办，这时候我们需要一个全局的goroutine队列。
+那么go的调度体系需要解决那些问题呢？回到gopher的世界中，有了小车，gopher搬砖的效率得到了很大的提升，但是作为黑心老板的我们想要榨干gopher的劳动力，不停的大量制造砖扔到gopher的小车子里，第一个问题来了，小车的容量有限，如果制造砖的速度大于消耗砖的速度，小车将无法继续装入更多的砖块了。同样的，go的世界中的小车P只能容纳256个goroutine，那么超出限额的goroutine应该放在哪里呢？
+
+为了解决这个问题，go引入了schedt结构，该结构时全局唯一也是全局可见的，它的作用主要为了存放关于调度的全局信息，比如，总共有多少个P，多少个空置的P，多少个M...有了这些信息才可以统筹规划调度，之后会详细介绍。除了这些，schedt结构中还维护了一个全局的goroutine队列，这个队列长度没有限制，当goroutine的数量超出P的容量时，M会将P中一半的goroutine放入全局队列。
 
 ```go
 type schedt struct {
@@ -85,15 +89,15 @@ type schedt struct {
 }
 ```
 
-当gopher车子中goroutine被堆满时，gopher会将车中一半的goroutine都扔到全局队列中。
-
 `runtime/proc.go--func findrunnable()`
 
-勤劳的gopher夜以继日幸苦劳作终于把车中的goroutine都执行完了，但是，它想起来还有一部分goroutine被自己扔在了全局队列中，于是它又跑去全局队列中拿goroutine，那么它应该拿多少goroutine呢？机智的gopher掐指一算，拿走了n个goroutine放到了自己小车中。`n := sched.runqsize/gomaxprocs + 1`.（n大于256则取256）。
+聪明的gopher也找到了相似的解决方法，它们建了一个砖堆用来存放多余的砖块。gopher夜以继日幸苦劳作终于把车中的goroutine都执行完了，但是，它想起来还有一部分砖被自己扔在了砖堆中，于是它又跑去砖堆中拿goroutine，那么它应该拿多少块砖呢？gopher想到自己有3个小伙伴，它觉得应该和它的小伙伴们平分这一堆砖，于是它拿走了砖堆中四分之一的砖。在go的世界中M会根据机器的核数来平分全局队列中的goroutine，当然如果平分后的结果大于P的容量，那么它只会拿走P的容量个goroutine。`n := sched.runqsize/gomaxprocs + 1`.（n大于256则取256）。
 
 为了防止全局队列中的goroutine“饿死”，在执行了61个本地队列的服务后，会从全局队列中获取一个服务。
 
-终于有一天，gopher发现连全局队列里的goroutine都被拿完了，gopher感觉自己已经到达了人生的巅峰终于可以安度晚年的。这时，另一个gopher推着小车经过了它的身边，善良而又勤劳的gopher想，虽然自己已经可以功成身退了，但是自己的兄弟们还在水深火热的境地中搬砖，于是它又推起了小车，偷偷的将刚刚那个gopher车里一半的砖放到了自己车里...
+终于有一天，gopher发现砖堆中的砖都也被拿完了，gopher感觉自己已经到达了人生的巅峰终于可以安度晚年的。这时，另一个gopher推着小车经过了它的身边，善良而又勤劳的gopher想，虽然自己已经可以功成身退了，但是自己的兄弟们还在水深火热的境地中搬砖，于是它又推起了小车，偷偷的将刚刚那个gopher车里一半的砖放到了自己车里...
+
+对于go中的M来说，这个过程称作为working steal，其源码如下：
 
 ```go
 // Steal half of elements from local runnable queue of p2
@@ -121,9 +125,9 @@ func runqsteal(_p_, p2 *p, stealRunNextG bool) *g {
 
 m会从其他m的p的队尾偷取一半的goroutine，以避免锁操作。
 
-![go-schedule-workingSteal](D:\doc\Time-to-go\media\go-schedule-workingSteal.png)
+![go-schedule-workingSteal](media/go-schedule-workingSteal.png)
 
-终于有一天，该搬的砖搬完了，不该搬的砖也偷不到了，gopher可以去休息了么？不一定，它有可能把小车放一旁被任命为负责值班的gopher--`spining m`，什么情况下gopher会变成值班人员，它又要干些什么呢？
+终于有一天，该搬的砖搬完了，不该搬的砖也偷不到了，gopher可以去休息了么？不一定，它有可能把小车放一旁被任命为负责值班的gopher--`spining m`。什么情况下M会变`spining m`，它又要干些什么呢？
 
 ```go
 	if !_g_.m.spinning && 2*atomic.Load(&sched.nmspinning) >= procs-atomic.Load(&sched.npidle) {
@@ -135,7 +139,7 @@ m会从其他m的p的队尾偷取一半的goroutine，以避免锁操作。
 	}
 ```
 
-当在运作的小车数量大于值班小车数量两倍的时候，没事干的gopher就会被派去值班，简单的来讲，有两个还在干活的gopher就至少会有一个值班gopher，以此类推。gopher被任命为值班者后会再次确认是否有还在干活的小伙伴们，是否有epoll任务是否有gc任务，如果有上述任务，那么值班gopher再次尝试working steal或者执行相关任务。
+当在运作的P数量（这个数量就被存在刚刚提到的schedt结构体中）大于`spinning m`数量两倍的时候，没事干的M就会被派去值班，简单的来讲，有两个还在干活的M就至少会有一个值班M，以此类推。M被任命为值班者后会再次确认是否有还在干活的小伙伴们，是否有epoll任务是否有gc任务，如果有上述任务，那么`spinning m`再次尝试working steal或者执行相关任务。
 
 有些时候值班小哥发现自己去工作了就已经没有人值班了，这个时候它会唤醒一个已经休息的gopher成为新的值班者。
 
@@ -164,7 +168,7 @@ D-->E(free unused span)
 
 跟调度关联紧密的是处理长时间被执行的goroutine的操作，该操作称为`retakep`。sysmon首先会查看当前执行goroutine的执行时常，当其超过了20us，就会触发retakep。sysmon首先会查看是由何原因导致了m长时间执行同一个任务。如果m长时间进入Syscall状态，那么当前goroutine无法被抢占，该M也没有能力继续执行P中的其他goroutine，所以sysmon会脱离M和P的绑定关系，同时唤醒或创建新的M和P绑定。
 
-![handoffp](D:\doc\Time-to-go\media\handoffp.png)
+![handoffp](media/handoffp.png)
 
 如果M并未进入Syscall，那么Sysmon置起当前goroutine的抢占标志位。当M发现当前G的抢占标志位被置起时，会将该G调度置全局队列中。
 
@@ -358,7 +362,7 @@ D-->调用mstart
 
 ```
 
-回忆以下上一节，其中有一个线程栈（g0）的概念，线程栈激素hi在rt0_go中被初始化的。有了线程栈之后，线程利用线程栈执行newproc启动main goroutine。newproc的细节在我们已经在上一章中熟悉了，这里也不再赘述，重点将目光聚焦在newproc接收的func上。通过分析汇编代码，我们发现runtime.mainPC传入了newproc，函数位于`runtime/proc.go--func main`。
+回忆以下上一节，其中有一个线程栈（g0）的概念，线程栈即使在rt0_go中被初始化的。有了线程栈之后，线程利用线程栈执行newproc启动main goroutine。newproc的细节在我们已经在上一章中熟悉了，这里也不再赘述，重点将目光聚焦在newproc接收的func上。通过分析汇编代码，我们发现runtime.mainPC传入了newproc，函数位于`runtime/proc.go--func main`。
 
 runtime.main的流程如下：
 

@@ -121,6 +121,8 @@ func runqsteal(_p_, p2 *p, stealRunNextG bool) *g {
 
 m会从其他m的p的队尾偷取一半的goroutine，以避免锁操作。
 
+![go-schedule-workingSteal](D:\doc\Time-to-go\media\go-schedule-workingSteal.png)
+
 终于有一天，该搬的砖搬完了，不该搬的砖也偷不到了，gopher可以去休息了么？不一定，它有可能把小车放一旁被任命为负责值班的gopher--`spining m`，什么情况下gopher会变成值班人员，它又要干些什么呢？
 
 ```go
@@ -151,7 +153,7 @@ Sysmon主要干如下几件事情：
 4. 将线程申请来的5分钟没有用的span退还给操作系统
 
 ```mermaid
-graph TB
+graph LR
 A(sysmon)-->B(poll network)
 B-->C(retakeP)
 C-->D(force GC)
@@ -162,18 +164,13 @@ D-->E(free unused span)
 
 跟调度关联紧密的是处理长时间被执行的goroutine的操作，该操作称为`retakep`。sysmon首先会查看当前执行goroutine的执行时常，当其超过了20us，就会触发retakep。sysmon首先会查看是由何原因导致了m长时间执行同一个任务。如果m长时间进入Syscall状态，那么当前goroutine无法被抢占，该M也没有能力继续执行P中的其他goroutine，所以sysmon会脱离M和P的绑定关系，同时唤醒或创建新的M和P绑定。
 
-```mermaid
-graph LR
-	subgraph handoffP
-	B1-->D(newM-Binding-P)
-	B1(oldM-Binding-P)-->C(oldM-Syscall)
-	end
-
-```
+![handoffp](D:\doc\Time-to-go\media\handoffp.png)
 
 如果M并未进入Syscall，那么Sysmon置起当前goroutine的抢占标志位。当M发现当前G的抢占标志位被置起时，会将该G调度置全局队列中。
 
 ![preempt](media/preempt.png)
+
+
 
 ## 3. Go背后的故事
 
@@ -361,23 +358,29 @@ D-->调用mstart
 
 ```
 
-回忆以下上一节，其中有一个线程栈的概念，那么线程栈就是在这里被初始化的。
+回忆以下上一节，其中有一个线程栈（g0）的概念，线程栈激素hi在rt0_go中被初始化的。有了线程栈之后，线程利用线程栈执行newproc启动main goroutine。newproc的细节在我们已经在上一章中熟悉了，这里也不再赘述，重点将目光聚焦在newproc接收的func上。通过分析汇编代码，我们发现runtime.mainPC传入了newproc，函数位于`runtime/proc.go--func main`。
 
-看到这里我们应该有一些疑问了，什么是g0？什么是m0？为什么需要被关联起来？我们先默默的在心里记下这些疑问，继续完成主线任务。
+runtime.main的流程如下：
 
-下一层是runtime.newproc，它在runtime包下proc.go文件中，谢天谢地终于不是汇编了...
+```mermaid
+graph LR
+runtime.main-->A(start sysmon)
+A-->B(runtime.init)
+B-->C(main.init)
+C-->D(main.main)
+```
+
+除了上述流程，在runtime.main中还定义了协程栈的可扩容致的最大值：
 
 ```go
-func newproc(siz int32, fn *funcval) {
-	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
-	gp := getg()
-	pc := getcallerpc()
-	systemstack(func() {
-		newproc1(fn, (*uint8)(argp), siz, gp, pc)
-	})
-}
+	if sys.PtrSize == 8 {
+		maxstacksize = 1000000000
+	} else {
+		maxstacksize = 250000000
+	}
 ```
 
 
 
 ## 5. Go程序的摄像机 -- go trace
+

@@ -483,4 +483,3 @@ Trace在显示事件时分为两类，一类是单个事件，显示为一条细
   当我们调用fmt.Print时，会发现P上也出现了一个Syscall相关的事件，这个事件和特殊事件中的Syscall有什么区别呢？在P上的Syscall一般是fastexitsyscall，M是不会主动与P解绑（handoffP），因此m在推出syscall时还是在这个P上，所以这种syscall可以说是属于某个P的。特殊事件中的Syscall，M在进入这种Syscall时有预感自己会被阻塞，它考虑到自己阻塞了不能耽误人家P啊，所以在进入Syscall时会主动和P解绑，这时它再从Syscall回来就不一定时原来的P了。但是有的fastexitsyscall也可能被sysmon强行解绑M和P（人艰不拆啊...），所以要根据展现出来的trace推断可能发生的事件...
 
 - GC相关（埋下伏笔，GC章节再来探讨吧）
-

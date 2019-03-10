@@ -386,7 +386,101 @@ C-->D(main.main)
 
 
 
-## 5. Go程序的摄像机 -- go trace
+## 5. Go程序的摄像机 -- go trace简介
 
 在调度的每个关键步骤旁都有一段代码在边上默默记录下发生的一切，就彷佛一台摄像机在观察着调度发生的一切，每一个goroutine的生老病死都在它的观测之下，这段代码所提供的服务就是go trace。当然为了使go trace运作，我们需要在代码中插入一些使能代码，告诉runtime中的trace代码摄像机被打开了，你们需要工作了。
+
+一个使用trace的简单例子：
+
+```go
+package main
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+	"runtime/trace"
+	"time"
+)
+
+func main(){
+	f, err := os.Create("trace.out") //定义记录trace的文件
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	err = trace.Start(f) //开始记录trace
+	if err != nil {
+		panic(err)
+	}
+	defer trace.Stop() //在main方法结束时停止记录trace
+
+	ch := make(chan bool)
+
+	go func(){
+		time.Sleep(10000)
+		ch<-true
+	}()
+	fmt.Println("waiting")
+	runtime.Gosched()
+	<-ch
+	fmt.Println("ok")
+}
+```
+
+在`trace.Start`和`trace.Stop`发生这两个事件的时间戳之间的进程运行状态就会被trace记录下来。运行程序后在同级目录下会多出一份trace文件，使用`go tool trace {traceFile}`，浏览器会被自动打开并展示trace（需使用chrome）。如下图：
+
+![trace1](D:\Time-to-go\media\trace1.PNG)
+
+Trace的横轴为时间轴，纵轴分为两栏，一栏称为STATS，主要记录的是某时刻goroutines，heap，threads数量以及所处状态。
+
+- Goroutines，记录了三种goroutine的状态
+- - Running：正在被执行的goroutine
+  - Runnable：在执行队列中可以被执行的goroutine
+  - GCWaiting：被gcAssist任务阻塞的goroutine
+- Heap，记录了两类内存：
+- - Allocated：在使用中的内存
+  - NextGC：在下次GC会被清理掉的内存
+- Thread，记录了两类线程
+  - Running：执行goroutine的线程
+  - Syscall：执行Syscall的线程
+
+另一栏称为PROCS，主要记录P上发生的事件，如上图的Proc0和Proc1就对应着两个P。而对于一些无法归结在某个P上的特殊事件则会归结在一个虚拟的时间轴上，如上图的Timer和Syscalls。
+
+Trace在显示事件时分为两类，一类是单个事件，显示为一条细线，一类是由两个事件组成的事件对，显示为一个色块，下文以xxx -- xxx表示。
+
+首先关注一下特殊的时间轴和特殊事件有哪些：
+
+| 名称    | 事件               | 含义                   |
+| ------- | ------------------ | ---------------------- |
+| Timers  | timer unblocks     | 定时任务到时           |
+| Syscall | syscall exit       | （M）从syscall状态返回 |
+| GC      | GC start -- GC end | 处于GC状态的时间块     |
+| NetPoll | network unblocks   | （M）poll网络任务成功  |
+
+发生在P上和goroutine相关的事件：
+
+- GoStart--GoStop/GoEnd：
+
+  正在运行的goroutine，显示的名称为newproc时传入的函数名称。goroutine状态由runable改变为running时会触发GoStart事件。goroutine状态由running改为其他时会触发GoStop/GoEnd事件。
+
+  在调度过程中会触发GoStart的行为有：
+
+  - GoCreate：通过newproc创建出一个goroutine
+  - GoSysExit：M从Syscall状态回归，重新执行goroutine。
+
+  - GoUnblock：被阻塞的goroutine被重新加入执行队列，例如，timer unblocks，由于定时器到时unpark某个goroutine。chan接收端被chan发送端unpark。网络任务获取成功，unpark因网络而阻塞的goroutine...
+
+  在调度过程中会触发GoStop的行为：
+
+  - GoSchedule：goroutine状态由running改变为runnable，执行了runtime.GoSchedu，将goroutine调度到了队尾
+  - Preempt：goroutine状态由running改变为runnable，该goroutine被抢占，比如sysmon抢占，gc抢占等
+  - GoBlock, GoBlockSend, GoBlockRecv, GoBlockSelect, GoBlockSync, GoBlockCond, GoBlockNet, GoSleep, GoSysBlock, GoBlockGC：goroutine状态由running改变为waiting，这些事件将导致goroutine阻塞。
+
+- Syscall：
+
+  当我们调用fmt.Print时，会发现P上也出现了一个Syscall相关的事件，这个事件和特殊事件中的Syscall有什么区别呢？在P上的Syscall一般是fastexitsyscall，M是不会主动与P解绑（handoffP），因此m在推出syscall时还是在这个P上，所以这种syscall可以说是属于某个P的。特殊事件中的Syscall，M在进入这种Syscall时有预感自己会被阻塞，它考虑到自己阻塞了不能耽误人家P啊，所以在进入Syscall时会主动和P解绑，这时它再从Syscall回来就不一定时原来的P了。但是有的fastexitsyscall也可能被sysmon强行解绑M和P（人艰不拆啊...），所以要根据展现出来的trace推断可能发生的事件...
+
+- GC相关（埋下伏笔，GC章节再来探讨吧）
 

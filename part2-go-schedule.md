@@ -431,7 +431,7 @@ func main(){
 
 在`trace.Start`和`trace.Stop`发生这两个事件的时间戳之间的进程运行状态就会被trace记录下来。运行程序后在同级目录下会多出一份trace文件，使用`go tool trace {traceFile}`，浏览器会被自动打开并展示trace（需使用chrome）。如下图：
 
-![trace1](D:\Time-to-go\media\trace1.PNG)
+![trace1](media/trace1.PNG)
 
 Trace的横轴为时间轴，纵轴分为两栏，一栏称为STATS，主要记录的是某时刻goroutines，heap，threads数量以及所处状态。
 
